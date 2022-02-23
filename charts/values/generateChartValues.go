@@ -1,18 +1,26 @@
 package main
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
+	"os/exec"
+	// "strings"
 
 	"github.com/segmentio/ksuid"
 	"gopkg.in/yaml.v2"
 
 	// platformv1 "tkestack.io/tke/api/platform/v1"
+	"encoding/json"
+
 	"tkestack.io/tke/cmd/tke-installer/app/installer/certs"
 	"tkestack.io/tke/cmd/tke-installer/app/installer/constants"
+	// "tkestack.io/tke/pkg/app/version"
+	images "tkestack.io/tke/pkg/platform/provider/baremetal/images"
+	"tkestack.io/tke/pkg/spec"
 
 	// v1 "tkestack.io/tke/pkg/platform/types/v1"
 	"tkestack.io/tke/pkg/util/pkiutil"
@@ -40,6 +48,10 @@ func GenerateValueChart() error {
 		os.Mkdir(DataDir, 0777)
 	}
 
+	if err := PatchPlatformVersion(); err != nil {
+		return err
+	}
+
 	if err := customConfig.GenerateCertificates(); err != nil {
 		return err
 	}
@@ -53,6 +65,35 @@ func GenerateValueChart() error {
 	if err := customConfig.GenerateGatewayChartValuesYaml(oIDCClientSecret); err != nil {
 		return err
 	}
+	return nil
+}
+
+func PatchPlatformVersion() error {
+	versionsByte, err := json.Marshal(spec.K8sVersions)
+	if err != nil {
+		return err
+	}
+	patchData := ClusterInfoPatch{}
+	patchData.Data.TkeVersion = "466b0576c4b2b04979dfce9f3ac10177a8afbfc5"
+	// get出来的值格式不对
+	// patchData.Data.TkeVersion = version.Get().GitVersion
+	patchData.Data.K8sValidVersions = string(versionsByte)
+	
+	bytes, err := yaml.Marshal(patchData)
+	if err != nil {
+		return err
+	}
+	patchFile := "patch.yaml"
+	if err := ioutil.WriteFile(patchFile, bytes, 0644); err != nil {
+		return err
+	}
+
+	commandStr := fmt.Sprintf("kubectl patch configmap cluster-info -n kube-public --patch \"$(cat %s)\"", patchFile)
+	cmd := exec.Command("/bin/bash", "-c", commandStr)
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -232,8 +273,8 @@ func (customConfig *CustomConfig) GenerateAuthChartValuesYaml(oIDCClientSecret s
 	if len(originAuthCustomConfig.Controller.AdminUsername) == 0 {
 		originAuthCustomConfig.Controller.AdminUsername = "admin"
 	}
-	originAuthCustomConfig.Controller.AdminPassword = []byte(originAuthCustomConfig.Controller.AdminUsername)
-	obj.TkeAuth = originAuthCustomConfig
+	originAuthCustomConfig.Controller.AdminPassword = base64.StdEncoding.EncodeToString([]byte(originAuthCustomConfig.Controller.AdminUsername))
+	obj.TKEAuth = *originAuthCustomConfig
 
 	bytes, errMarshal := yaml.Marshal(obj)
 	if errMarshal != nil {
@@ -252,13 +293,23 @@ func (customConfig *CustomConfig) GeneratePlatformChartValuesYaml() error {
 	}
 
 	obj := PlatformChartValue{
-		Etcd:  customConfig.Etcd,
-		Cacrt: string(cacrt),
+		Etcd:     customConfig.Etcd,
+		Cacrt:    string(cacrt),
 	}
 
 	originPlatformCustomConfig := customConfig.TkePlatform
 	if originPlatformCustomConfig == nil {
 		return errors.New("platform custom config content error")
+	}
+
+	if len(customConfig.TkePlatform.PublicIP) <= 0 {
+		return errors.New("platform custom config publicIP nil")
+	}
+	if len(originPlatformCustomConfig.MetricsServerImage) <= 0 {
+		originPlatformCustomConfig.MetricsServerImage = images.Get().MetricsServer.BaseName()
+	}
+	if len(originPlatformCustomConfig.AddonResizerImage) <= 0 {
+		originPlatformCustomConfig.AddonResizerImage = images.Get().AddonResizer.BaseName()
 	}
 
 	if originPlatformCustomConfig.API.Replicas <= 0 {
@@ -280,7 +331,7 @@ func (customConfig *CustomConfig) GeneratePlatformChartValuesYaml() error {
 	if len(originPlatformCustomConfig.Controller.MonitorStorageAddresses) == 0 {
 		originPlatformCustomConfig.Controller.MonitorStorageAddresses = fmt.Sprintf("http://%s:8086", customConfig.ServerIPs[0])
 	}
-	obj.TKEPlatform = originPlatformCustomConfig
+	obj.TKEPlatform = *originPlatformCustomConfig
 
 	bytes, errMarshal := yaml.Marshal(obj)
 	if errMarshal != nil {
@@ -308,7 +359,7 @@ func (customConfig *CustomConfig) GenerateGatewayChartValuesYaml(oIDCClientSecre
 	if len(originGatewayCustomConfig.OIDCClientSecret) == 0 {
 		originGatewayCustomConfig.OIDCClientSecret = oIDCClientSecret
 	}
-	obj.TKEGateway = originGatewayCustomConfig
+	obj.TKEGateway = *originGatewayCustomConfig
 
 	bytes, errMarshal := yaml.Marshal(obj)
 	if errMarshal != nil {
