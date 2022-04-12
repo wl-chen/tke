@@ -33,7 +33,7 @@ type CreateClusterPara struct {
 }
 
 func (c *CreateClusterPara) RegistryIP() string {
-	if c.Config.HA != nil {
+	if c.Config.HA != nil && (c.Config.HA.TKEHA != nil || c.Config.HA.ThirdPartyHA != nil) {
 		return c.Config.HA.VIP()
 	}
 	return c.Cluster.Spec.Machines[0].IP
@@ -264,6 +264,7 @@ type ExternalInfluxDBMonitor struct {
 type HA struct {
 	TKEHA        *TKEHA        `json:"tke,omitempty"`
 	ThirdPartyHA *ThirdPartyHA `json:"thirdParty,omitempty"`
+	StorageHA    *StorageHA    `json:"storageHA,omitempty"`
 }
 
 func (ha *HA) VIP() string {
@@ -281,6 +282,33 @@ type TKEHA struct {
 type ThirdPartyHA struct {
 	VIP   string `json:"vip" validate:"required"`
 	VPort int32  `json:"vport"`
+}
+
+type StorageHA struct {
+	NFS     *NFS     `json:"nfs,omitempty"`
+	CephRBD *CephRBD `json:"cephRBD,omitempty"`
+}
+
+type NFS struct {
+	Server       string        `json:"server" validate:"required"`
+	Path         string        `json:"path" validate:"required"`
+	StorageClass *StorageClass `json:"storageClass,omitempty"`
+}
+
+type CephRBD struct {
+	CsiConfig     []CsiConfig   `json:"csiConfig" validate:"required"`
+	SecretUserId  string        `json:"userID" validate:"required"`
+	SecretUserKey []byte        `json:"userKey" validate:"required"`
+	StorageClass  *StorageClass `json:"storageClass,omitempty"`
+}
+
+type StorageClass struct {
+	Name string `json:"name,omitempty"`
+}
+
+type CsiConfig struct {
+	ClusterID string   `json:"clusterID" validate:"required"`
+	Monitors  []string `json:"monitors" validate:"required"`
 }
 
 type Gateway struct {

@@ -294,6 +294,15 @@ func (t *TKE) initSteps() {
 		},
 	}...)
 
+	if t.Para.Config.HA != nil && t.Para.Config.HA.StorageHA != nil {
+		t.steps = append(t.steps, []types.Handler{
+			{
+				Name: "Install storage provisioner",
+				Func: t.installStorageProvisionerChart,
+			},
+		}...)
+	}
+
 	if t.Para.Config.Registry.TKERegistry != nil {
 		t.steps = append(t.steps, []types.Handler{
 			{
@@ -942,7 +951,7 @@ func (t *TKE) determineGatewayHTTPSAddress() string {
 	var host string
 	if t.Para.Config.Gateway.Domain != "" {
 		host = t.Para.Config.Gateway.Domain
-	} else if t.Para.Config.HA != nil {
+	} else if t.Para.Config.HA != nil && (t.Para.Config.HA.TKEHA != nil || t.Para.Config.HA.ThirdPartyHA != nil) {
 		host = t.Para.Config.HA.VIP()
 	} else {
 		host = t.Para.Cluster.Spec.Machines[0].IP
@@ -1062,7 +1071,7 @@ func (t *TKE) do() {
 		var host string
 		if t.Para.Config.Gateway.Domain != "" {
 			host = t.Para.Config.Gateway.Domain
-		} else if t.Para.Config.HA != nil {
+		} else if t.Para.Config.HA != nil && (t.Para.Config.HA.TKEHA != nil || t.Para.Config.HA.ThirdPartyHA != nil) {
 			host = t.Para.Config.HA.VIP()
 		} else {
 			host = t.Para.Cluster.Spec.Machines[0].IP
@@ -1088,7 +1097,7 @@ func (t *TKE) do() {
 		t.progress.Hosts = append(t.progress.Hosts, t.Para.Config.Registry.TKERegistry.Domain)
 	}
 
-	if t.Para.Config.HA != nil {
+	if t.Para.Config.HA != nil && (t.Para.Config.HA.TKEHA != nil || t.Para.Config.HA.ThirdPartyHA != nil) {
 		t.progress.Servers = append(t.progress.Servers, t.Para.Config.HA.VIP())
 	}
 	t.progress.Servers = append(t.progress.Servers, t.servers...)
@@ -1745,7 +1754,7 @@ func (t *TKE) getTKEAuthAPIOptions(ctx context.Context) (map[string]interface{},
 	if t.Para.Config.Gateway != nil && t.Para.Config.Gateway.Domain != "" {
 		redirectHosts = append(redirectHosts, t.Para.Config.Gateway.Domain)
 	}
-	if t.Para.Config.HA != nil {
+	if t.Para.Config.HA != nil && (t.Para.Config.HA.TKEHA != nil || t.Para.Config.HA.ThirdPartyHA != nil) {
 		redirectHosts = append(redirectHosts, t.Para.Config.HA.VIP())
 	}
 	if t.Para.Cluster.Spec.PublicAlternativeNames != nil {
@@ -1924,6 +1933,119 @@ func (t *TKE) getTKEPlatformControllerOptions(ctx context.Context) map[string]in
 	return options
 }
 
+func (t *TKE) installStorageProvisionerChart (ctx context.Context) error {
+	if t.Para.Config.HA.StorageHA.CephRBD != nil {
+		return t.installCephRBDProvisionerChart(ctx)
+	} else if t.Para.Config.HA.StorageHA.NFS != nil {
+		return t.installNFSProvisionerChart(ctx)
+	} else {
+		return fmt.Errorf("install storage provisioner chart fail, no provisioner config in storage ha")
+	}
+}
+
+func (t *TKE) installCephRBDProvisionerChart (ctx context.Context) error {
+	values := map[string]interface{}{
+		"csiConfig": t.Para.Config.HA.StorageHA.CephRBD.CsiConfig,
+		"secret": map[string]interface{}{
+			"userID": t.Para.Config.HA.StorageHA.CephRBD.SecretUserId,
+			"userKey": t.Para.Config.HA.StorageHA.CephRBD.SecretUserId,	
+		},
+	}
+
+	if t.Para.Config.HA.StorageHA.CephRBD.StorageClass == nil {
+		t.Para.Config.HA.StorageHA.CephRBD.StorageClass = &types.StorageClass{}
+	}
+	if len(t.Para.Config.HA.StorageHA.CephRBD.StorageClass.Name) == 0 {
+		t.Para.Config.HA.StorageHA.CephRBD.StorageClass.Name = constants.CephRBDStorageClassName
+	}
+	values["storageClass"] = t.Para.Config.HA.StorageHA.CephRBD.StorageClass
+
+	chartPathOptions := &helmaction.ChartPathOptions{}
+	installOptions := &helmaction.InstallOptions{
+		Namespace:        t.namespace,
+		ReleaseName:      "ceph-csi-rbd",
+		DependencyUpdate: false,
+		Values:           values,
+		Timeout:          10 * time.Minute,
+		ChartPathOptions: *chartPathOptions,
+	}
+
+	chartFilePath := constants.ChartDirName + "ceph-csi-rbd/"
+	if _, err := t.helmClient.InstallWithLocal(installOptions, chartFilePath); err != nil {
+		uninstallOptions := helmaction.UninstallOptions{
+			Timeout:     10 * time.Minute,
+			ReleaseName: "ceph-csi-rbd",
+			Namespace:   t.namespace,
+		}
+		reponse, err := t.helmClient.Uninstall(&uninstallOptions)
+		if err != nil {
+			return fmt.Errorf("%s uninstall fail, err = %s", reponse.Release.Name, err.Error())
+		}
+		return err
+	}
+
+	return wait.PollImmediate(5*time.Second, 10*time.Minute, func() (bool, error) {
+		provisionerOk, err := apiclient.CheckDeployment(ctx, t.globalClient, t.namespace, "ceph-csi-rbd-provisioner")
+		if err != nil {
+			return false, nil
+		}
+		nodepluginOk, err := apiclient.CheckDaemonset(ctx, t.globalClient, t.namespace, "ceph-csi-rbd-nodeplugin")
+		if err != nil {
+			return false, nil
+		}
+		return provisionerOk && nodepluginOk, nil
+	})
+}
+
+func (t *TKE) installNFSProvisionerChart (ctx context.Context) error {
+	values := map[string]interface{}{
+		"nfs": map[string]interface{}{
+			"server": t.Para.Config.HA.StorageHA.NFS.Server,
+			"path": t.Para.Config.HA.StorageHA.NFS.Path,
+		},
+	}
+
+	if t.Para.Config.HA.StorageHA.NFS.StorageClass == nil {
+		t.Para.Config.HA.StorageHA.NFS.StorageClass = &types.StorageClass{}
+	}
+	if len(t.Para.Config.HA.StorageHA.NFS.StorageClass.Name) == 0 {
+		t.Para.Config.HA.StorageHA.NFS.StorageClass.Name = constants.NFSStorageClassName
+	}
+	values["storageClass"] = t.Para.Config.HA.StorageHA.NFS.StorageClass
+
+	chartPathOptions := &helmaction.ChartPathOptions{}
+	installOptions := &helmaction.InstallOptions{
+		Namespace:        t.namespace,
+		ReleaseName:      "nfs-subdir-external-provisioner",
+		DependencyUpdate: false,
+		Values:           values,
+		Timeout:          10 * time.Minute,
+		ChartPathOptions: *chartPathOptions,
+	}
+
+	chartFilePath := constants.ChartDirName + "nfs-subdir-external-provisioner/"
+	if _, err := t.helmClient.InstallWithLocal(installOptions, chartFilePath); err != nil {
+		uninstallOptions := helmaction.UninstallOptions{
+			Timeout:     10 * time.Minute,
+			ReleaseName: "nfs-subdir-external-provisioner",
+			Namespace:   t.namespace,
+		}
+		reponse, err := t.helmClient.Uninstall(&uninstallOptions)
+		if err != nil {
+			return fmt.Errorf("%s uninstall fail, err = %s", reponse.Release.Name, err.Error())
+		}
+		return err
+	}
+
+	return wait.PollImmediate(5*time.Second, 10*time.Minute, func() (bool, error) {
+		provisionerOk, err := apiclient.CheckDeployment(ctx, t.globalClient, t.namespace, "nfs-subdir-external-provisioner")
+		if err != nil {
+			return false, nil
+		}
+		return provisionerOk, nil
+	})
+}
+
 func (t *TKE) installTKEBusinessAPI(ctx context.Context) error {
 	options := map[string]interface{}{
 		"Replicas":                   t.Config.Replicas,
@@ -1977,16 +2099,38 @@ func (t *TKE) installTKEBusinessController(ctx context.Context) error {
 
 func (t *TKE) installInfluxDB(ctx context.Context) error {
 
-	node, err := apiclient.GetNodeByMachineIP(ctx, t.globalClient, t.servers[0])
-	if err != nil {
-		return err
+	options := map[string]interface{}{
+		"Image":    images.Get().InfluxDB.FullName(),
 	}
 
-	err = apiclient.CreateResourceWithDir(ctx, t.globalClient, "manifests/influxdb/*.yaml",
-		map[string]interface{}{
-			"Image":    images.Get().InfluxDB.FullName(),
-			"NodeName": node.Name,
-		})
+	options["cephRbd"] = false
+	options["nfs"] = false
+	options["baremetalStorage"] = false
+	if t.Para.Config.HA != nil && t.Para.Config.HA.StorageHA != nil {
+		if t.Para.Config.HA.StorageHA.CephRBD != nil {
+			options["cephRbd"] = true
+			options["cephRbdPVCName"] = "ceph-rbd-influxDb-pvc"
+			options["cephRbdStorageClassName"] = t.Para.Config.HA.StorageHA.CephRBD.StorageClass.Name
+		} else if t.Para.Config.HA.StorageHA.NFS != nil {
+			options["nfs"] = true
+			options["nfsPVCName"] = "nfs-influxDb-pvc"
+			options["nfsStorageClassName"] = t.Para.Config.HA.StorageHA.NFS.StorageClass.Name
+		} else {
+			return fmt.Errorf("storage ha config wrong")
+		}
+	} else {
+		options["baremetalStorage"] = true
+	}
+
+	if options["baremetalStorage"] == true {
+		node, err := apiclient.GetNodeByMachineIP(ctx, t.globalClient, t.servers[0])
+		if err != nil {
+			return err
+		}
+		options["NodeName"] = node.Name
+	}
+
+	err := apiclient.CreateResourceWithDir(ctx, t.globalClient, "manifests/influxdb/*.yaml", options)
 	if err != nil {
 		return err
 	}
@@ -2233,6 +2377,26 @@ func (t *TKE) installTKERegistryAPI(ctx context.Context) error {
 	}
 	//or enable filesystem by default
 	options["FilesystemEnabled"] = !s3Enabled
+	if options["FilesystemEnabled"] == true {
+		options["cephRbd"] = false
+		options["nfs"] = false
+		options["baremetalStorage"] = false
+		if t.Para.Config.HA != nil && t.Para.Config.HA.StorageHA != nil {
+			if t.Para.Config.HA.StorageHA.CephRBD != nil {
+				options["cephRbd"] = true
+				options["cephRbdPVCName"] = "ceph-rbd-registry-pvc"
+				options["cephRbdStorageClassName"] = t.Para.Config.HA.StorageHA.CephRBD.StorageClass.Name
+			} else if t.Para.Config.HA.StorageHA.NFS != nil {
+				options["nfs"] = true
+				options["nfsPVCName"] = "nfs-registry-pvc"
+				options["nfsStorageClassName"] = t.Para.Config.HA.StorageHA.NFS.StorageClass.Name
+			} else {
+				return fmt.Errorf("storage ha config wrong")
+			}
+		} else {
+			options["baremetalStorage"] = true
+		}
+	}
 
 	if t.Para.Config.Auth.OIDCAuth != nil {
 		options["OIDCClientID"] = t.Para.Config.Auth.OIDCAuth.ClientID
@@ -2280,6 +2444,13 @@ func (t *TKE) installTKERegistryController(ctx context.Context) error {
 	}
 	//or enable filesystem by default
 	options["FilesystemEnabled"] = !s3Enabled
+	if options["FilesystemEnabled"] == true {
+		if t.Para.Config.HA != nil && t.Para.Config.HA.StorageHA == nil {
+			options["baremetalStorage"] = true
+		} else {
+			options["baremetalStorage"] = false
+		}
+	}
 
 	err = apiclient.CreateResourceWithDir(ctx, t.globalClient, "manifests/tke-registry-controller/*.yaml", options)
 	if err != nil {

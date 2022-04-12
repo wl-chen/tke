@@ -67,7 +67,7 @@ func (t *TKE) Init() {
 	if t.Para.Config.Gateway != nil && t.Para.Config.Gateway.Domain != "" {
 		t.RedirectHosts = append(t.RedirectHosts, t.Para.Config.Gateway.Domain)
 	}
-	if t.Para.Config.HA != nil {
+	if t.Para.Config.HA != nil && (t.Para.Config.HA.TKEHA != nil || t.Para.Config.HA.ThirdPartyHA != nil) {
 		t.RedirectHosts = append(t.RedirectHosts, t.Para.Config.HA.VIP())
 	}
 	if t.Para.Cluster.Spec.PublicAlternativeNames != nil {

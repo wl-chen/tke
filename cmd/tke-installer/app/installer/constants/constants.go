@@ -104,3 +104,8 @@ const (
 
 	PathForDiskSpaceRequest = "/var/lib"
 )
+
+const (
+	CephRBDStorageClassName = "csi-rbd-sc"
+	NFSStorageClassName = "nfs-sc"
+)
