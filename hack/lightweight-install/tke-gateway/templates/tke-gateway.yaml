@@ -11,14 +11,17 @@ metadata:
 spec:
   selector:
     app: tke-gateway
+  type: NodePort
   ports:
     - name: http
-      protocol: TCP
+      nodePort: 31180
       port: 80
+      protocol: TCP
       targetPort: 80
     - name: https
-      protocol: TCP
+      nodePort: 31443
       port: 443
+      protocol: TCP
       targetPort: 443
 ---
 apiVersion: apps/v1
@@ -36,16 +39,13 @@ spec:
         app: tke-gateway
     spec:
       dnsPolicy: ClusterFirstWithHostNet
-      hostNetwork: true
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
       containers:
         - name: tke-gateway
           image: {{ .Values.image }}
           args:
             - -C=/app/conf/tke-gateway.toml
           volumeMounts:
-            - name: certs-volume
+            - name: certs
               mountPath: /app/certs
             - name: tke-gateway-volume
               mountPath: /app/conf
@@ -71,12 +71,56 @@ spec:
               cpu: 50m
               memory: 128Mi
       volumes:
-        - name: certs-volume
-          configMap:
-            name: certs
         - name: tke-gateway-volume
           configMap:
             name: tke-gateway
+        - name: certs
+          projected:
+            sources:
+            - secret:
+                name: tke-ca
+                items:
+                - key: tls.crt
+                  path: ca.crt
+                - key: tls.key
+                  path: ca.key
+                optional: false
+            - secret:
+                name: tke-auth-server-secret
+                items:
+                - key: tls.crt
+                  path: server.crt
+                - key: tls.key
+                  path: server.key
+                optional: false
+            - secret:
+                name: tke-ca-admin
+                items:
+                - key: tls.crt
+                  path: admin.crt
+                - key: tls.key
+                  path: admin.key
+                optional: false
+            - secret:
+                name: tke-ca-webhook
+                items:
+                - key: tls.crt
+                  path: webhook.crt
+                - key: tls.key
+                  path: webhook.key
+                optional: false
+            - secret:
+                name: tke-gateway-cluster-certs
+                items:
+                - key: etcd-ca.crt
+                  path: etcd-ca.crt
+                - key: etcd.crt
+                  path: etcd.crt
+                - key: etcd.key
+                  path: etcd.key
+                - key: front-proxy-ca.crt
+                  path: front-proxy-ca.crt
+                optional: false
 ---
 apiVersion: v1
 kind: ConfigMap

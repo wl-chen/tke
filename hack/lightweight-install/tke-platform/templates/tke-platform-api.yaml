@@ -3,8 +3,9 @@ apiVersion: apiregistration.k8s.io/v1
 kind: APIService
 metadata:
   name: v1.platform.tkestack.io
+  annotations:
+    cert-manager.io/inject-ca-from: tke/tke-ca
 spec:
-  caBundle: {{ .Values.caCrt | b64enc }}
   group: platform.tkestack.io
   groupPriorityMinimum: 1000
   service:
@@ -67,7 +68,7 @@ spec:
             - --audit-webhook-config-file=/app/conf/audit-api-client-config.yaml
 {{- end }}
           volumeMounts:
-            - name: certs-volume
+            - name: certs
               mountPath: /app/certs
             - name: tke-platform-api-volume
               mountPath: /app/conf
@@ -113,9 +114,55 @@ spec:
               cpu: 100m
               memory: 256Mi
       volumes:
-        - name: certs-volume
-          configMap:
-            name: certs
+        - name: certs
+          projected:
+            sources:
+            - secret:
+                name: tke-ca
+                items:
+                - key: tls.crt
+                  path: ca.crt
+                - key: tls.key
+                  path: ca.key
+                optional: false
+            - secret:
+                name: tke-platform-server-secret
+                items:
+                - key: tls.crt
+                  path: server.crt
+                - key: tls.key
+                  path: server.key
+                optional: false
+            - secret:
+                name: tke-ca-admin
+                items:
+                - key: tls.crt
+                  path: admin.crt
+                - key: tls.key
+                  path: admin.key
+                optional: false
+            - secret:
+                name: tke-ca-webhook
+                items:
+                - key: tls.crt
+                  path: webhook.crt
+                - key: tls.key
+                  path: webhook.key
+                optional: false
+            - secret:
+                name: tke-platform-cluster-certs
+                items:
+                - key: etcd-ca.crt
+                  path: etcd-ca.crt
+                - key: etcd.crt
+                  path: etcd.crt
+                - key: etcd.key
+                  path: etcd.key
+                - key: front-proxy-ca.crt
+                  path: front-proxy-ca.crt
+                - key: token.csv
+                  path: token.csv
+                optional: false
         - name: tke-platform-api-volume
           configMap:
             name: tke-platform-api
