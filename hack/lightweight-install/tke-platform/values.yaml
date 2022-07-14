@@ -1,11 +1,28 @@
 etcd:
   host: https://172.19.0.2:2379
-# 必填 公网可访问的集群IP
-publicIP: 43.156.24.48
-metricsServerImage: tkestack/metrics-server:v0.3.6
-addonResizerImage: tkestack/addon-resizer:1.8.11
+provider:
+  config: 
 api:
-  replicas: 1
+  labels:
+    app: tke-platform-api
+  annotations:
+  selector:
+    matchLabels:
+      app: tke-platform-api
+  podAnnotations:
+  podLabels:
+    app: tke-platform-api
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+        - matchExpressions:
+          - key: node-role.kubernetes.io/master
+            operator: Exists
+  replicas: 2
   image:
     repository: tkestack/tke-platform-api-amd64
     tag: v1.9.0
@@ -28,7 +45,26 @@ api:
   clusterContext:
   clusterCredentialsContext:
 controller:
-  replicas: 1
+  labels:
+    app: tke-platform-controller
+  annotations:
+  selector:
+    matchLabels:
+      app: tke-platform-controller
+  podAnnotations:
+  podLabels:
+    app: tke-platform-controller
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+        - matchExpressions:
+          - key: node-role.kubernetes.io/master
+            operator: Exists
+  replicas: 2
   providerResImage: "tkestack/provider-res-amd64:v1.21.4-3"
   image:
     repository: tkestack/tke-platform-controller-amd64
@@ -48,6 +84,8 @@ controller:
   # 监控存储地址，为tke集群master ip地址加8086端口
   monitorStorageAddresses: http://172.19.0.2:8086
 certificate:
+  serverCertDuration: 876000h
+  serverCertRenewBefore: 875900h
   mountPath: /etc/kubernetes/pki
   dnsNames:
   uris: 

@@ -3,29 +3,28 @@ kind: Deployment
 apiVersion: apps/v1
 metadata:
   labels:
-    app: tke-auth-controller
+{{ toYaml .Values.controller.labels | indent 4 }}
   name: tke-auth-controller
   namespace: tke
+  {{- if .Values.controller.annotations }}
+  annotations:
+{{ toYaml .Values.controller.annotations | indent 4 }}
+  {{- end }}
 spec:
   replicas: {{ .Values.controller.replicas }}
   selector:
-    matchLabels:
-      app: tke-auth-controller
+{{ toYaml .Values.controller.selector | indent 4 }}
   template:
     metadata:
+      {{- if .Values.controller.podAnnotations }}
+      annotations:
+{{ toYaml .Values.controller.podAnnotations | indent 8 }}
+      {{- end }}
       labels:
-        app: tke-auth-controller
+{{ toYaml .Values.controller.podLabels | indent 8 }}
     spec:
       affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: node-role.kubernetes.io/control-plane
-                operator: Exists
-            - matchExpressions:
-              - key: node-role.kubernetes.io/master
-                operator: Exists
+{{ toYaml .Values.controller.affinity | indent 8 }}
       tolerations:
       - key: node-role.kubernetes.io/master
         operator: Exists

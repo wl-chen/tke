@@ -27,17 +27,33 @@ spec:
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
+  {{- if .Values.labels }}
+  annotations:
+{{ toYaml .Values.labels | indent 4 }}
+  {{- end }}
   name: tke-gateway
   namespace: tke
+  {{- if .Values.annotations }}
+  annotations:
+{{ toYaml .Values.annotations | indent 4 }}
+  {{- end }}
 spec:
   selector:
-    matchLabels:
-      app: tke-gateway
+{{ toYaml .Values.selector | indent 4 }}
   template:
     metadata:
       labels:
-        app: tke-gateway
+      {{- if .Values.podAnnotations }}
+      annotations:
+{{ toYaml .Values.podAnnotations | indent 8 }}
+      {{- end }}
+      labels:
+{{ toYaml .Values.podLabels | indent 8 }}
     spec:
+      {{- if .Values.affinity }}
+      affinity:
+{{ toYaml .Values.affinity | indent 8 }}
+      {{- end }}
       dnsPolicy: ClusterFirstWithHostNet
       tolerations:
       - key: node-role.kubernetes.io/master

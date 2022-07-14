@@ -11,28 +11,43 @@ metadata:
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
+  {{- if .Values.masq.labels }}
+  labels:
+{{ toYaml .Values.masq.labels | indent 4 }}
+  {{- end }}
   name: ip-masq-agent
   namespace: kube-system
+  {{- if .Values.masq.annotations }}
+  annotations:
+{{ toYaml .Values.masq.annotations | indent 4 }}
+  {{- end }}
 spec:
   selector:
-    matchLabels:
-      name: ip-masq-agent
+{{ toYaml .Values.masq.selector | indent 4 }}
   template:
     metadata:
+      {{- if .Values.masq.podAnnotations }}
+      annotations:
+{{ toYaml .Values.masq.podAnnotations | indent 8 }}
+      {{- end }}
       labels:
-        name: ip-masq-agent
+{{ toYaml .Values.masq.podLabels | indent 8 }}
     spec:
+      {{- if .Values.masq.affinity }}
+      affinity:
+{{ toYaml .Values.masq.affinity | indent 8 }}
+      {{- end }}
       containers:
-        - image: {{ .Values.masqImage }}
-          imagePullPolicy: IfNotPresent
+        - image: "{{ .Values.masq.image.repository }}:{{ .Values.masq.image.tag }}"
+          imagePullPolicy: "{{ .Values.masq.image.imagePullPolicy }}"
           name: ip-masq-agent
           resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: {{ .Values.masq.resources.limits.cpu }}
+              memory: {{ .Values.masq.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.masq.resources.requests.cpu }}
+              memory: {{ .Values.masq.resources.requests.memory }}
           securityContext:
             privileged: true
           terminationMessagePath: /dev/termination-log
