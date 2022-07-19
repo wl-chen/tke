@@ -79,7 +79,7 @@ controller:
   # tke集群的密码，默认自动生成
   adminPassword: admin
 etcd:
-  host: https://172.19.0.2:2379
+  host: https://etcd.kube-system:2379
 certificate:
    # 100y
   caCertDuration: 876000h

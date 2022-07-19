@@ -1,7 +1,30 @@
 etcd:
-  host: https://172.19.0.2:2379
+  host: https://etcd.kube-system:2379
 provider:
-  config: 
+  config: |    
+    platformAPIClientConfig: conf/tke-platform-config.yaml
+    applicationAPIClientConfig: conf/tke-application-config.yaml
+    registry:
+      prefix: registry.tke.com/library
+      ip: 127.0.0.1
+    audit:
+      address: ""
+    feature:
+      skipConditions: []
+    docker:
+      extraArgs: {}
+    kubelet:
+      extraArgs: {}
+    apiServer:
+      extraArgs: {}
+    controllerManager:
+      extraArgs: {}
+    scheduler:
+      extraArgs: {}
+    authzWebhook:
+      endpoint: https://127.0.0.1:31138/auth/authz
+    business:
+      enabled: true
 api:
   labels:
     app: tke-platform-api
