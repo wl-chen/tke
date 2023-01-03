@@ -1708,6 +1708,7 @@ func (p *Provider) EnsureCheckAnywhereSubscription(ctx context.Context, c *v1.Cl
 	}
 	// Update appVersion after all system components deployed
 	c.Status.AppVersion = c.Spec.AppVersion
+	c.Status.ComponentPhase = platformv1.ComponentDeployed
 	return nil
 }
 
