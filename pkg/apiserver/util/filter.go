@@ -23,6 +23,7 @@ import (
 
 	metainternal "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/klog/v2"
 	"tkestack.io/tke/pkg/apiserver/authentication"
 	"tkestack.io/tke/pkg/apiserver/filter"
 )
@@ -31,8 +32,10 @@ import (
 // attribute of the request user.
 func PredicateListOptions(ctx context.Context, options *metainternal.ListOptions) *metainternal.ListOptions {
 	_, tenantID := authentication.UsernameAndTenantID(ctx)
+	klog.Infof("list cluster tenant is %s", tenantID)
 	if tenantID == "" {
 		tenantID = filter.TenantIDFrom(ctx)
+		klog.Infof("position list cluster tenant is %s", tenantID)
 		if tenantID == "" {
 			return options
 		}
